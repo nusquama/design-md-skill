@@ -1,14 +1,15 @@
 ---
 name: design-md-extract
 description: >-
-  Extracts a complete, agent-ready design.md from any website URL, HTML file,
-  image, screenshot, or frontend codebase (React, Vue, Svelte, Angular, plain
-  HTML/CSS, Tailwind). Produces a DESIGN.md with YAML design tokens (colors,
-  typography, spacing, rounded, components) plus prose sections so any agent can
-  rebuild the site without inventing styles. Use when the user says "extract the
-  design", "create a design.md", "reverse-engineer this site's style", "clone
-  this look", "design system from this image", or provides a URL/HTML/image and
-  wants a reusable design document.
+  Extract a complete, agent-ready DESIGN.md from any source: live website URL,
+  HTML file, image/screenshot/mockup, frontend codebase, or existing tokens.
+  For websites it runs a deterministic extractor (designlang) on the rendered
+  DOM; for images it infers tokens via k-means + vision LLM and verifies every
+  font size against the chosen typeface. Output follows the Google Stitch
+  DESIGN.md spec plus W3C DTCG tokens, CSS variables, and an optional HTML
+  style-guide mirror. Use when the user says "extract the design", "create a
+  design.md", "reverse-engineer this site's style", "clone this look", or
+  provides a URL/HTML/image and wants a reusable design document.
 ---
 
 # design-md-extract
@@ -28,9 +29,9 @@ spacing value is captured so the consuming agent never has to guess.
 - Always preserve original token names exactly, including typos — note them, don't "fix" them.
 - Never fabricate a value. If data is missing, mark the section `> TODO: [what is missing]`.
 - Never invent a font size from an image without verifying it against the chosen typeface's metrics.
-- Always run the validation checklist before delivering.
+- Always run the validation checklist (and the lint script when available) before delivering.
 - Always confirm with the user (summary + missing sections) before writing the final file, unless they said "just do it" / "auto".
-- Keep this SKILL.md under 500 lines. Put long examples in `references/`.
+- Keep this SKILL.md under 500 lines. Put long examples and templates in `references/`.
 
 ## What a DESIGN.md Is
 
@@ -58,39 +59,44 @@ If multiple inputs are given, extract each and merge — later sources override 
 
 ---
 
-## Branch A — Website / HTML
+## Branch A — Website / HTML (deterministic)
 
 Goal: read the **rendered** styles, not just the source. Source CSS lies; computed styles tell the truth.
 
-1. If a URL: fetch the page. Prefer a headless browser (Playwright) to get the fully rendered DOM + computed styles. If only `curl`/fetch is available, parse the raw HTML/CSS and note that computed values may differ.
-2. Collect stylesheets: `<link rel=stylesheet>`, inline `<style>`, and any CSS-in-JS runtime styles.
-3. For the key elements (hero, nav, buttons, cards, inputs, headings, body), record **computed** values:
-   - `color`, `background-color`, `border-color`, `border-width`, `border-radius`
-   - `font-family`, `font-size`, `font-weight`, `line-height`, `letter-spacing`
-   - `padding`, `margin`, `gap`, `width`, `max-width`
-   - `box-shadow`, `opacity`, `transition`
-4. Detect the framework from signals (`data-reactroot`, `ng-version`, `data-v-`, Tailwind utility classes, etc.) and read its theme config if present (`tailwind.config.*`, CSS variables on `:root`).
-5. Map everything into the token schema (Branch D).
+1. **Run the extractor** on the provided URL (preferred) or HTML file:
 
-## Branch B — Image / Screenshot
+```bash
+npx designlang <url> --screenshots
+# multi-page:
+npx designlang <url> --depth 3 --screenshots
+# dark mode:
+npx designlang <url> --dark --screenshots
+```
+
+If `designlang` is unavailable, fall back to the agent's own tools: fetch the HTML, resolve every `<link rel=stylesheet>`, extract CSS custom properties (`--*`) with `python scripts/extract_css_vars.py`, and capture a screenshot at 1440×900 (and 375×812) via Playwright only when the raw HTML is empty (SPA without SSR).
+
+2. Read the generated `*-design-language.md`, `*-design-tokens.json`, and `*-variables.css`.
+3. Map the extracted tokens into the schema (Branch D). Tokens coming from CSS variables get ✅ high confidence by default.
+4. Spot-check a few components against the screenshot to confirm the extractor didn't miss visual-only details (e.g. a shadow the CSS didn't declare).
+5. Run `npx @google/design.md lint DESIGN.md` (or `python scripts/lint_design_md.py`) and fix every error before delivering.
+
+## Branch B — Image / Screenshot (infer, then verify)
 
 Goal: infer the system, then **verify** it. Images are lossy — an 18px font in a screenshot may actually be 16px or 20px in the real typeface. Never trust a raw pixel measurement alone.
 
 1. Describe the overall atmosphere in 1–2 sentences (density, mood, temperature).
-2. Sample the dominant colors with a color picker / histogram. Group into primary, secondary, tertiary, neutral, surfaces, text, borders, functional states.
-3. Identify the typeface by visual signature (geometric sans, humanist sans, serif, mono). Pick the closest available web font. **Then verify**: render sample text at the guessed size and compare letter-spacing, x-height, and weight against the image. Adjust the size up or down until the rendered text matches the image's proportions. Record the final verified size.
-4. Measure spacing by comparing element gaps to a reference (e.g., the body font size). Snap to a scale (4px or 8px base). Record both the measured value and the snapped token.
-5. For borders/radius: compare corner curvature to known scales (`rounded-sm` 4px, `md` 8px, `lg` 12px, `full`). Pick the closest and note confidence.
-6. Shadows: classify flat / whisper / soft / heavy and record the CSS `box-shadow` string that best reproduces it.
-7. Run the same validation checklist as Branch A. Mark low-confidence values with `> TODO: verify`.
+2. **Palette (deterministic):** run `python3 scripts/quantize_palette.py <image> --k 12 --no-crop`. Filter out pure grays (unless UI surfaces), photographic content colors, and near-duplicates (Δhex < 8/channel). Map survivors to semantic names: `primary`, `secondary`, `tertiary`, `neutral`, `surface`, `on-surface`, `error`, `success`, `warning`, `info`.
+3. **Typography (vision + verification):** identify the typeface by visual signature. Pick the closest web font, then **verify**: render sample text at the guessed size and compare letter-spacing, x-height, and weight against the image. Adjust the size up or down until the rendered text matches. Record the final verified size and mark confidence (✅/⚠️/❓). If the font is proprietary, emit the Google Fonts fallback as `fontFamily` and document the original in prose.
+4. **Spacing:** measure gaps against a reference (body font size), snap to a 4px or 8px base, record both measured and snapped values.
+5. **Radius / borders / shadows:** compare to known scales, pick the closest, note confidence.
+6. Run the same validation checklist as Branch A. Mark low-confidence values with `> TODO: verify`.
 
 ## Branch C — Codebase
 
-1. Detect stack from `package.json` / config files (React, Vue, Svelte, Angular, Tailwind, styled-components, CSS-in-JS, plain CSS).
+1. Detect stack from `package.json` / config files.
 2. Read, in priority order: theme/token files → `tailwind.config.*` → global CSS / CSS variables → component styles → inline styles.
-3. Theme files beat component styles: a `theme.ts` declares intent; scattered inline styles show what shipped. Extract from the theme first, spot-check components for overrides.
-4. CSS custom properties (`--brand-primary`) are intentional tokens — respect them.
-5. Map into the token schema.
+3. Theme files beat component styles. CSS custom properties are intentional tokens — respect them.
+4. Map into the token schema.
 
 ## Branch D — Token Mapping (all branches converge here)
 
@@ -101,6 +107,8 @@ Build the YAML frontmatter. Use these groups:
 version: alpha
 name: <project or descriptive name>
 description: <one line>
+source: <url | file | image path>
+captured_at: <YYYY-MM-DD>
 colors:
   primary: "#..."
   secondary: "#..."
@@ -159,8 +167,6 @@ components:
     rounded: "{rounded.md}"
     padding: 12px 20px
     fontFamily: "{typography.label-lg.fontFamily}"
-  button-primary-hover:
-    backgroundColor: "{colors.primary-dark}"
   card:
     backgroundColor: "{colors.surface}"
     rounded: "{rounded.lg}"
@@ -176,47 +182,58 @@ components:
 ```
 
 Rules:
-- Token references use `{path.to.token}` and must point to primitives (except inside `components`, where composite refs like `{typography.label-lg}` are allowed).
+- Token references use `{path.to.token}` and must point to primitives (except inside `components`, where composite refs are allowed).
 - Every color token value is a valid CSS color; hex `#RRGGBB` is the default.
 - `fontWeight` is numeric. `lineHeight` is unitless (multiplier) when possible.
 - `spacing` scale uses named levels: `xs sm md lg xl 2xl 3xl` plus semantic keys (`gutter`, `margin`).
 - Component variants get their own keys: `button-primary`, `button-primary-hover`, `button-primary-active`.
+- Every important inference carries a confidence level (✅ high / ⚠️ medium / ❓ low). In the prose, write the ref then the literal: `{colors.primary}` (#171717).
 
 ---
+
+## Companion outputs (always emit when data allows)
+
+1. **`design-tokens.json`** — W3C DTCG format (`$value` / `$type` / `$description` / `$extensions.confidence`). This is the canonical machine-readable source; the YAML frontmatter is the inline shorthand.
+2. **`tokens.css`** — every token as a CSS custom property in `:root` (`--color-primary`, `--text-h1-size`, `--rounded-md`, `--space-lg`, ...). Generated from the same token map so the HTML agent can `var()` everything.
+3. **`design-a11y.md`** — WCAG 2.1 contrast report for key text/surface pairs (run `python scripts/check_contrast.py`).
+4. **`design.html`** (optional) — self-contained, token-driven style guide mirroring the `.md`, for the human to read.
 
 ## Markdown Body (required sections, in order)
 
 ## Overview
-2–3 sentences: visual character, intended product, key conventions. E.g. "A focused, minimal dark interface for a developer tool. Clean lines, low visual noise, high information density."
+2–3 sentences: visual character, intended product, key conventions.
 
 ## Colors
-List every color as a bullet: `**Name (#hex):** role`. Group: Primary Foundation, Accent & Interactive, Typography & Text Hierarchy, Functional States (success/error/warning/info), Surfaces. Include dark-mode variants if detected.
+List every color as a bullet: `**Name (#hex):** role`. Group: Primary Foundation, Accent & Interactive, Typography & Text Hierarchy, Functional States, Surfaces. Include dark-mode variants if detected. Cite confidence per token.
 
 ## Typography
-- Font families with character description (geometric vs humanist, serif vs sans).
-- Full hierarchy table: Display, H1–H3, Body (lg/md/sm), Label, Caption — each with size, weight, line-height, letter-spacing.
+- Font families with character description (geometric vs humanist, serif vs sans) + Google Fonts fallback if proprietary.
+- Full hierarchy table: Display, H1–H3, Body (lg/md/sm), Label, Caption — each with size, weight, line-height, letter-spacing, confidence.
 - Rules: max two weights per screen, when to use uppercase labels, number styling.
 
 ## Layout
-- Grid model (fluid / fixed-max-width / hybrid) and max content width.
+- Grid model and max content width.
 - Spacing scale and the base unit (4px or 8px).
 - Container padding, section gaps, card internal padding.
-- Breakpoints: `sm 640, md 768, lg 1024, xl 1280, 2xl 1536` (Tailwind defaults) or the project's actual ones.
+- Breakpoints.
 
 ## Elevation & Depth
-Flat (borders/tonal layers) or shadowed. List each shadow level with its CSS string and which components use it. Note z-index scale if present.
+Flat (borders/tonal layers) or shadowed. List each shadow level with its CSS string and which components use it. Note decorative depth (gradients, polarity flips) separately.
 
 ## Shapes
-Corner radius language in words + tokens. E.g. "Architectural sharpness: 4px on all interactive elements." Border widths.
+Corner radius language in words + tokens. Border widths.
 
 ## Components
 For each relevant atom — Buttons, Chips, Inputs, Cards, Lists, Nav, Tooltips, Checkboxes, Radios — give: variants, sizing, padding, radius, colors, states (default/hover/active/focus/disabled), transitions.
 
 ## Do's and Don'ts
-4–8 guardrails. E.g. "Do use primary only for the single most important action per screen." "Don't mix rounded and sharp corners in one view." "Do maintain WCAG AA (4.5:1 normal text)."
+4–8 guardrails, each specific to this design and citing tokens. E.g. "Do use primary only for the single most important action per screen." "Don't mix rounded and sharp corners in one view."
 
 ## Responsive Behavior
 Breakpoints, stacking rules, touch-target minimum (44px), what collapses and how.
+
+## Open Questions
+What couldn't be determined and what needs human input. If none, justify why.
 
 ## Agent Prompt Guide
 A ready-to-paste instruction block the consuming agent can use, e.g.:
@@ -232,28 +249,28 @@ List any value that differed between sources and which one won.
 
 - [ ] YAML frontmatter parses; every `{ref}` resolves to a defined primitive.
 - [ ] Every color has name + hex + role; near-duplicates consolidated.
-- [ ] Typography covers Display, H1–H3, Body, Label, Caption with size/weight/line-height/tracking.
+- [ ] Typography covers Display, H1–H3, Body, Label, Caption with size/weight/line-height/tracking + confidence.
 - [ ] Spacing scale is complete and monotonic; base unit stated.
 - [ ] Radius + border + shadow tokens present (or section marked TODO).
 - [ ] At least Buttons, Cards, Inputs documented with states.
-- [ ] Do's and Don'ts has ≥4 items; Responsive section present.
+- [ ] Do's and Don'ts has ≥4 items; Responsive section present; Open Questions present (or justified).
 - [ ] Image-sourced sizes were verified against the chosen typeface (Branch B).
 - [ ] No fabricated values; every gap is a `TODO`.
+- [ ] `npx @google/design.md lint DESIGN.md` (or lint script) returns zero errors.
 - [ ] Document reads as intent + tokens, not a raw CSS dump.
 
 ---
 
 ## Output
 
-Write `DESIGN.md` to the path the user gave (default: project root). Then show:
+Write `DESIGN.md` to the path the user gave (default: project root), plus `design-tokens.json`, `tokens.css`, and `design-a11y.md` when data allows. Then show:
 1. A one-line summary (colors count, type levels, spacing steps).
 2. The sections included vs marked TODO.
 3. The validation result.
 
-If the user asked for more (Tailwind config, shadcn theme, Figma variables, DTCG `tokens.json`), emit those as sibling files using the same tokens — but the canonical deliverable is always `DESIGN.md`.
+If the user asked for more (Tailwind config, shadcn theme, Figma variables), emit those as sibling files using the same tokens — but the canonical deliverable is always `DESIGN.md`.
 
 ## When NOT to Use
 
 - The user wants a finished website, not a design document → use a build skill.
-- The user wants brand guidelines for a known company → point them to awesome-design-md.
 - The source is a video or 3D model → out of scope.
