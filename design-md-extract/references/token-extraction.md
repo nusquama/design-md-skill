@@ -1,76 +1,63 @@
-# Token Extraction — How to infer tokens with rigor
+# Token Extraction — designlang parity
 
-## Philosophy
+This reference defines how tokens are produced for each branch, so every
+emitter (DTCG, Tailwind, shadcn, Figma, CSS, theme.js) consumes the **same**
+map.
 
-**Token = named, reusable design decision.** A color is not a token; `primary = #3B82F6` with a semantic role is. Your job is to **infer the system** the designer used, not list loose values.
+## Common token groups
 
-Three principles:
-1. **Look for repetition.** If a value appears once, it's not a token. If it appears three or more times, it probably is.
-2. **Infer semantic roles, not just numeric scales.** "Dark blue color" is worse than "primary".
-3. **Mark confidence honestly.** If unsure about the role, say so.
-
-## Color tokens
-1. Identify unique colors with precise hex codes.
-2. Group by family (all blues, all grays).
-3. Assign semantic role based on where they appear:
-   - CTA buttons, primary links → `primary`
-   - Page backgrounds → `surface` / `background`
-   - Card backgrounds → `surface-elevated`
-   - Main text → `text-primary`
-   - Secondary text → `text-muted`
-   - Subtle borders → `border`
-   - Success / warning / error → `success` / `warning` / `error`
-4. Detect scale if 3+ tints of the same color are used systematically.
-
-## Typography tokens
-Identify family in order of reliability:
-1. CSS accessible → ✅ certainty.
-2. Visually recognized → ⚠️ medium. Say "looks like Inter".
-3. Unrecognized → describe it ("geometric sans with open apertures").
-
-Infer scale from most common measurements:
-- Display: 48-72px · H1: 32-48px · H2: 24-32px · H3: 18-24px · Body: 14-16px · Caption: 11-12px
-
-Report only weights actually seen. Don't assume 300-900 if you only saw 400 and 600.
-
-Watch for: negative tracking on large headings (-0.02em), generous body line-height (1.5-1.7), tight heading line-height (1.1-1.2).
-
-## Spacing tokens
-Infer base unit from distances: 4px (fine-grained), 8px (classic), 16px (simple marketing).
-Report observable multiples, not the entire possible scale.
-
-## Radius tokens
-none: 0 · sm: 4px · md: 8px · lg: 12px · xl: 16px · 2xl: 24px · full: 9999px
-
-## Shadow tokens
-shadow-sm / md / lg / xl with qualitative intensity. Report exact CSS only when inferable.
-
-## Output: design-tokens.json (DTCG)
-
-```json
-{
-  "color": {
-    "primary": { "$value": "#3B82F6", "$type": "color", "$description": "Primary action", "$extensions": { "confidence": "high" } }
-  },
-  "typography": {
-    "font-size": {
-      "body": { "$value": "16px", "$type": "dimension" },
-      "h1": { "$value": "48px", "$type": "dimension" }
-    }
-  },
-  "spacing": {
-    "1": { "$value": "4px", "$type": "dimension" },
-    "4": { "$value": "16px", "$type": "dimension" }
-  },
-  "radius": {
-    "sm": { "$value": "6px", "$type": "dimension" }
-  }
-}
+```yaml
+colors:        primary, secondary, tertiary, neutral, surface, on-surface,
+               error, success, warning, info (+ dark variants)
+typography:    display, h1, h2, h3, body-lg, body-md, body-sm, label-lg,
+               label-sm, caption
+spacing:       base, xs, sm, md, lg, xl, 2xl, 3xl, gutter
+rounded:       none, sm, md, lg, xl, full
+borders:       thin, thick
+shadows:       sm, md, lg
+components:    button-primary, button-primary-hover, button-primary-active,
+               card, input, nav, ...
 ```
 
-- `$value` holds the concrete value. `$type` is canonical (`color`, `dimension`, `fontFamily`, ...).
-- `$extensions.confidence` carries the skill-specific metadata without breaking spec compliance.
-- **Only generate this file if you extracted real tokens.** If the source was ambiguous, don't invent the JSON.
+## Branch A — Website (designlang)
 
-## Golden rule
-> A short and honest system is better than a long and invented one.
+1. Run `npx designlang <url> [--screenshots] [--dark] [--depth N] [--pdf]`.
+2. Read `*-design-tokens.json` (DTCG) and `*-variables.css` directly — these
+   ARE the canonical map. Do not re-derive.
+3. Confidence: ✅ for every token coming from computed CSS. ⚠️ only for
+   visual-only details the CSS didn't declare (e.g. a shadow).
+
+## Branch B — Image (infer + verify)
+
+1. **Palette:** `python3 scripts/quantize_palette.py <image> --k 12 --no-crop`.
+   Filter grays/photographic/near-duplicates. Map to semantic names.
+2. **Typography:** identify typeface by visual signature → pick closest web
+   font → **verify** by rendering sample text at guessed size and comparing
+   x-height, letter-spacing, weight to the image. Adjust until match. Record
+   final size + confidence.
+3. **Spacing:** measure gaps vs body font size, snap to 4px/8px base.
+4. **Radius / borders / shadows:** compare to known scales, pick closest.
+5. Emit the same DTCG + CSS + Tailwind + shadcn + Figma + theme.js + preview
+   from this map. Mark ⚠️/❓ on every inferred value.
+
+## Branch C — Codebase
+
+Priority: theme/token files → `tailwind.config.*` → global CSS vars →
+component styles → inline styles. CSS custom properties are intentional
+tokens — respect them.
+
+## Branch D — Merge
+
+Later sources override earlier ones. List conflicts in `## Conflicts`.
+
+## Emitter rules (all branches)
+
+- `*-variables.css`: every global value is a `var()` — no hardcoded literals for
+  colors, spacing, radii, type sizes. This is what makes "change H1 size →
+  updates everywhere" true.
+- `*-tailwind.config.js`: `theme.extend` wired to the same tokens.
+- `*-shadcn-theme.css`: shadcn globals.css format.
+- `*-figma-variables.json`: light + dark.
+- `*-theme.js`: React/CSS-in-JS object.
+- `*-design-tokens.json`: DTCG with `$value` / `$type` / `$description` /
+  `$extensions.confidence`.

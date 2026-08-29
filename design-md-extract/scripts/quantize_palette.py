@@ -1,78 +1,28 @@
 #!/usr/bin/env python3
-"""Extract a dominant color palette from a screenshot via k-means.
-
-Usage:
-    python3 quantize_palette.py <image.png> [--k 12] [--no-crop]
-"""
-from __future__ import annotations
-
-import argparse
-import sys
-from pathlib import Path
-
+"""Quantize an image's dominant colors (k-means) for Branch B."""
+import sys, json
 try:
     from PIL import Image
     import numpy as np
     from sklearn.cluster import KMeans
-except ImportError as e:
-    sys.stderr.write(
-        f"Missing dependency: {e}. Install with:\n"
-        f"  python3 -m pip install Pillow numpy scikit-learn\n"
-    )
+except ImportError:
+    print(json.dumps({"error": "pillow + scikit-learn required"}))
     sys.exit(1)
 
-
-def crop_canvas(img: Image.Image) -> Image.Image:
-    w, h = img.size
-    left = min(290, w // 5)
-    top = min(60, h // 15)
-    bottom_offset = min(160, h // 6)
-    return img.crop((left, top, w, h - bottom_offset))
-
-
-def quantize(
-    img: Image.Image,
-    k: int = 12,
-    sample: tuple[int, int] = (400, 250),
-    drop_brightness_above: int = 245,
-) -> list[tuple[tuple[int, int, int], float]]:
-    img = img.convert('RGB').resize(sample)
-    arr = np.array(img).reshape(-1, 3).astype(np.float32)
-    bright = arr.mean(axis=1)
-    mask = bright < drop_brightness_above
-    arr_filt = arr[mask] if mask.sum() > 1000 else arr
-    km = KMeans(n_clusters=k, n_init=4, random_state=42).fit(arr_filt)
-    centers = km.cluster_centers_.round().astype(int)
-    counts = np.bincount(km.labels_, minlength=k)
-    total = counts.sum()
-    return sorted(
-        [(tuple(c.tolist()), counts[i] / total) for i, c in enumerate(centers)],
-        key=lambda x: -x[1],
-    )
-
-
 def main():
-    ap = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
-    ap.add_argument('image', type=Path)
-    ap.add_argument('--k', type=int, default=12, help='Number of clusters (default 12)')
-    ap.add_argument('--no-crop', action='store_true', help='Skip Figma-chrome crop')
-    args = ap.parse_args()
-
-    if not args.image.exists():
-        sys.stderr.write(f"File not found: {args.image}\n")
+    if len(sys.argv) < 2:
+        print("Usage: quantize_palette.py <image> [--k 12] [--no-crop]")
         sys.exit(1)
+    path = sys.argv[1]
+    k = 12
+    if "--k" in sys.argv:
+        k = int(sys.argv[sys.argv.index("--k") + 1])
+    img = Image.open(path).convert("RGB")
+    img = img.resize((150, 150))
+    pixels = np.array(img).reshape(-1, 3)
+    km = KMeans(n_clusters=k, n_init=10, random_state=0).fit(pixels)
+    centers = km.cluster_centers_.astype(int)
+    print(json.dumps(["#%02x%02x%02x" % tuple(c) for c in centers], indent=2))
 
-    img = Image.open(args.image)
-    if not args.no_crop:
-        img = crop_canvas(img)
-
-    palette = quantize(img, k=args.k)
-    print(f"# Palette from {args.image.name}  (top {len(palette)} clusters)")
-    print(f"# {'hex':<10} {'pct':>6}  rgb")
-    for (r, g, b), pct in palette:
-        hex_ = f"#{r:02x}{g:02x}{b:02x}"
-        print(f"{hex_:<10} {pct*100:>5.1f}%  rgb({r},{g},{b})")
-
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

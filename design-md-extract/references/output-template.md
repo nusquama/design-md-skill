@@ -1,8 +1,29 @@
-# Output Template — DESIGN.md
+# Output Template — designlang output pack
 
-This is the **base** template. Adapt depth per emphasis (reconstruction / mood / system), but don't remove sections unless explicitly empty — in which case, say so.
+This template mirrors the files produced by `npx designlang <url>`. Adapt depth
+per emphasis, but don't remove files unless explicitly empty — in which case,
+say so.
 
-The frontmatter is a subset of the companion `design-tokens.json` (DTCG). The YAML is the inline-readable shorthand; the JSON is the canonical machine source.
+## File set (write to `./design-extract-output/`)
+
+| File | Source |
+|---|---|
+| `*-design-language.md` | Google Stitch 19-section spec |
+| `*-design-tokens.json` | W3C DTCG (primitive + semantic + composite) |
+| `*-variables.css` | CSS custom properties (`:root`) |
+| `*-tailwind.config.js` | Tailwind theme.extend wired to tokens |
+| `*-shadcn-theme.css` | shadcn/ui globals.css variables |
+| `*-figma-variables.json` | Figma Variables import (light + dark) |
+| `*-theme.js` | React / CSS-in-JS theme object |
+| `*-preview.html` | Visual report: swatches, type scale, shadows, a11y |
+| `*-motion-tokens.json` | Durations, easings, springs |
+| `*-voice.json` | Brand voice — tone, CTA verbs |
+| `*-prompts/` | v0 / Lovable / Cursor / Claude Artifacts |
+| `*-grade.html` | Design Report Card (letter grade + evidence) |
+| `*-grade.svg` | Shields.io-style badge |
+| `brandbook.pdf` | 13-chapter brand book (optional) |
+
+## `*-design-language.md` body (required sections, in order)
 
 ```markdown
 ---
@@ -84,7 +105,7 @@ components:
 **Confidence**: [✅ | ⚠️ | ❓]
 
 ### 1.2 Brand voice / Atmosphere
-[2-3 dense paragraphs: what does this design BELIEVE about its audience?]
+[2-3 dense paragraphs.]
 
 ### 1.3 The "ONE brand thing"
 [The single element that carries the brand alone.]
@@ -112,16 +133,24 @@ components:
 Suggested stack, quick wins, tricky bits, implicit states, confidence map.
 
 ## 6. Do's and Don'ts
-5-7 of each, each citing tokens explicitly. Brand-specific, not generic UX.
+5-7 of each, each citing tokens explicitly.
 
 ## 7. Open Questions
 [Things you couldn't determine. Or: "Material sufficient for complete reconstruction."]
 
 ## 8. Companion files
 - [ ] design-tokens.json (DTCG)
-- [ ] tokens.css
-- [ ] design-a11y.md
-- [ ] design.html (optional)
+- [ ] variables.css
+- [ ] tailwind.config.js
+- [ ] shadcn-theme.css
+- [ ] figma-variables.json
+- [ ] theme.js
+- [ ] preview.html
+- [ ] motion-tokens.json
+- [ ] voice.json
+- [ ] prompts/
+- [ ] grade.html
+- [ ] grade.svg
 ```
 
 ### Confidence marker rules
@@ -130,4 +159,4 @@ Suggested stack, quick wins, tricky bits, implicit states, confidence map.
 - ❓ low: reasonable speculation, say so openly
 
 ### Token reference syntax in prose
-Write the ref followed by the literal value in parens: `{colors.primary}` (#171717). This makes the file refactor-safe.
+Write the ref followed by the literal value in parens: `{colors.primary}` (#171717).
